@@ -81,3 +81,83 @@ export const updateProfile = asyncHandlers(async (req, res) => {
     },
   });
 });
+
+export const getSettings = asyncHandlers(async (req, res) => {
+  const user = await User.findById(req.user._id).select("settings");
+
+  if (!user) {
+    throw new ApiErrors(404, "User not found");
+  }
+
+  res.status(200).json(user.settings);
+});
+
+export const updateSettings = asyncHandlers(async (req, res) => {
+  const {
+    currency,
+    notifications,
+    biometric_lock_enabled,
+    quick_add_default_partner,
+    export_format,
+  } = req.body;
+
+  const updateFields = {};
+
+  if (currency !== undefined) {
+    if (typeof currency !== "string" || currency.trim().length !== 3) {
+      throw new ApiErrors(400, "Currency must be a 3-letter ISO code");
+    }
+    updateFields["settings.currency"] = currency.trim().toUpperCase();
+  }
+
+  if (notifications !== undefined) {
+    if (typeof notifications !== "object" || notifications === null) {
+      throw new ApiErrors(400, "Notifications must be an object");
+    }
+    if (notifications.enabled !== undefined) {
+      updateFields["settings.notifications.enabled"] = Boolean(
+        notifications.enabled
+      );
+    }
+    if (notifications.email !== undefined) {
+      updateFields["settings.notifications.email"] = Boolean(
+        notifications.email
+      );
+    }
+    if (notifications.push !== undefined) {
+      updateFields["settings.notifications.push"] = Boolean(notifications.push);
+    }
+  }
+
+  if (biometric_lock_enabled !== undefined) {
+    updateFields["settings.biometric_lock_enabled"] = Boolean(
+      biometric_lock_enabled
+    );
+  }
+
+  if (quick_add_default_partner !== undefined) {
+    updateFields["settings.quick_add_default_partner"] =
+      quick_add_default_partner || null;
+  }
+
+  if (export_format !== undefined) {
+    const validFormats = ["csv", "json", "excel"];
+    if (!validFormats.includes(export_format)) {
+      throw new ApiErrors(
+        400,
+        `export_format must be one of: ${validFormats.join(", ")}`
+      );
+    }
+    updateFields["settings.export_format"] = export_format;
+  }
+
+  if (Object.keys(updateFields).length === 0) {
+    throw new ApiErrors(400, "No valid fields to update");
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(req.user._id, updateFields, {
+    new: true,
+  }).select("settings");
+
+  res.status(200).json(updatedUser.settings);
+});

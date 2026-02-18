@@ -60,6 +60,40 @@ const userSchema = new Schema(
       type: [String],
       default: [],
     },
+    settings: {
+      currency: {
+        type: String,
+        default: "USD",
+        uppercase: true,
+      },
+      notifications: {
+        enabled: {
+          type: Boolean,
+          default: true,
+        },
+        email: {
+          type: Boolean,
+          default: true,
+        },
+        push: {
+          type: Boolean,
+          default: true,
+        },
+      },
+      biometric_lock_enabled: {
+        type: Boolean,
+        default: false,
+      },
+      quick_add_default_partner: {
+        type: String,
+        default: null,
+      },
+      export_format: {
+        type: String,
+        enum: ["csv", "json", "excel"],
+        default: "csv",
+      },
+    },
   },
   {
     timestamps: true,
