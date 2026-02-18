@@ -869,3 +869,60 @@ export const getLeaderboard = asyncHandlers(async (req, res) => {
     },
   });
 });
+
+export const exportTransactionsCSV = asyncHandlers(async (req, res) => {
+  const { recorded_for, date_from, date_to, category } = req.query;
+
+  const filter = {};
+
+  if (recorded_for) {
+    if (!mongoose.Types.ObjectId.isValid(recorded_for)) {
+      throw new ApiErrors(400, "Invalid partner ID format");
+    }
+    filter.partner_id = recorded_for;
+  }
+
+  if (date_from || date_to) {
+    filter.transaction_date = {};
+    if (date_from) filter.transaction_date.$gte = new Date(date_from);
+    if (date_to) filter.transaction_date.$lte = new Date(date_to);
+  }
+
+  if (category) {
+    filter.category = category;
+  }
+
+  const date = new Date();
+  const formattedDate = date.toISOString().slice(0, 10).replace(/-/g, "");
+  const filename = `transactions_${formattedDate}.csv`;
+
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+  const csvHeader =
+    "id,recorded_for,recorded_by,amount,currency,category,context,date,receipt_url\n";
+  res.write(csvHeader);
+
+  const cursor = Transaction.find(filter)
+    .sort({ transaction_date: -1 })
+    .populate("partner_id", "name")
+    .populate("recorded_by", "name email")
+    .cursor();
+
+  for await (const t of cursor) {
+    const row = [
+      t._id.toString(),
+      t.partner_id?.name || "",
+      t.recorded_by?.name || "",
+      t.amount,
+      t.currency,
+      t.category || "",
+      t.context || "",
+      t.transaction_date?.toISOString() || "",
+      t.receipt_url || "",
+    ].join(",");
+    res.write(row + "\n");
+  }
+
+  res.end();
+});

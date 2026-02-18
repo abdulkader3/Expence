@@ -6,6 +6,7 @@ import userRoutes from "./routes/user.routes.js";
 import partnerRoutes from "./routes/partner.routes.js";
 import transactionRoutes from "./routes/transaction.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
+import exportRoutes from "./routes/export.routes.js";
 import { ApiErrors } from "./utils/ApiErrors.js";
 
 const app = express();
@@ -36,6 +37,7 @@ app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/partners", partnerRoutes);
 app.use("/api/v1/transactions", transactionRoutes);
 app.use("/api/v1/uploads", uploadRoutes);
+app.use("/api/v1/exports", exportRoutes);
 
 // Route
 
