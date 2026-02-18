@@ -14,7 +14,7 @@ const transactionSchema = new Schema(
     type: {
       type: String,
       required: [true, "Transaction type is required"],
-      enum: ["contribution", "expense", "adjustment"],
+      enum: ["contribution", "expense", "adjustment", "undo"],
     },
     description: {
       type: String,
@@ -54,6 +54,15 @@ const transactionSchema = new Schema(
       default: null,
       index: true,
     },
+    related_to: {
+      type: Schema.Types.ObjectId,
+      ref: "Transaction",
+      default: null,
+    },
+    is_reversing: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
@@ -65,6 +74,7 @@ transactionSchema.index({ recorded_by: 1 });
 transactionSchema.index({ category: 1 });
 transactionSchema.index({ transaction_date: -1 });
 transactionSchema.index({ context: "text", description: "text" });
+transactionSchema.index({ related_to: 1 });
 
 const Transaction = mongoose.model("Transaction", transactionSchema);
 

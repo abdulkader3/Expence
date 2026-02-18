@@ -700,3 +700,68 @@ export const getTransactionDetail = asyncHandlers(async (req, res) => {
     },
   });
 });
+
+export const undoTransaction = asyncHandlers(async (req, res) => {
+  const { transaction_id } = req.params;
+  const { reason } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(transaction_id)) {
+    throw new ApiErrors(404, "Transaction not found");
+  }
+
+  const originalTransaction = await Transaction.findById(transaction_id);
+  if (!originalTransaction) {
+    throw new ApiErrors(404, "Transaction not found");
+  }
+
+  if (originalTransaction.type === "undo") {
+    throw new ApiErrors(400, "This transaction has already been undone");
+  }
+
+  const existingUndo = await Transaction.findOne({
+    related_to: transaction_id,
+  });
+  if (existingUndo) {
+    throw new ApiErrors(400, "This transaction has already been undone");
+  }
+
+  const partner = await Partner.findById(originalTransaction.partner_id);
+  if (!partner) {
+    throw new ApiErrors(404, "Partner not found");
+  }
+
+  const isReversing =
+    new Date() - new Date(originalTransaction.created_at) > 5 * 1000;
+
+  const undoTransaction = await Transaction.create({
+    partner_id: originalTransaction.partner_id,
+    amount: -Math.abs(originalTransaction.amount),
+    type: "undo",
+    description: reason
+      ? `Undo reason: ${reason}`
+      : `Undo of transaction ${transaction_id}`,
+    category: originalTransaction.category,
+    context: originalTransaction.context,
+    currency: originalTransaction.currency,
+    transaction_date: new Date(),
+    recorded_by: req.user._id,
+    related_to: originalTransaction._id,
+    is_reversing: !isReversing,
+  });
+
+  await Partner.findByIdAndUpdate(originalTransaction.partner_id, {
+    $inc: { total_contributed: -Math.abs(originalTransaction.amount) },
+  });
+
+  const updatedPartner = await Partner.findById(originalTransaction.partner_id);
+
+  res.status(201).json({
+    undo_transaction: {
+      id: undoTransaction._id.toString(),
+      type: undoTransaction.type,
+      amount: Math.abs(undoTransaction.amount),
+      related_to: originalTransaction._id.toString(),
+    },
+    partner_total: updatedPartner.total_contributed,
+  });
+});
