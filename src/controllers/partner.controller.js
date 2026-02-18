@@ -382,3 +382,122 @@ export const createContribution = asyncHandlers(async (req, res) => {
     partner_total: updatedPartner.total_contributed,
   });
 });
+
+export const listTransactions = asyncHandlers(async (req, res) => {
+  const {
+    recorded_for,
+    recorded_by,
+    date_from,
+    date_to,
+    category,
+    q,
+    page = 1,
+    per_page = 10,
+    sort_by = "date_desc",
+  } = req.query;
+
+  const finalLimit = parseInt(per_page) || 10;
+  const finalOffset = (parseInt(page) - 1) * finalLimit;
+
+  const filter = {};
+
+  if (recorded_for) {
+    if (!mongoose.Types.ObjectId.isValid(recorded_for)) {
+      throw new ApiErrors(400, "Invalid partner ID format");
+    }
+    filter.partner_id = recorded_for;
+  }
+
+  if (recorded_by) {
+    if (!mongoose.Types.ObjectId.isValid(recorded_by)) {
+      throw new ApiErrors(400, "Invalid user ID format");
+    }
+    filter.recorded_by = recorded_by;
+  }
+
+  if (date_from || date_to) {
+    filter.transaction_date = {};
+    if (date_from) filter.transaction_date.$gte = new Date(date_from);
+    if (date_to) filter.transaction_date.$lte = new Date(date_to);
+  }
+
+  if (category) {
+    filter.category = category;
+  }
+
+  if (q) {
+    filter.$or = [
+      { context: { $regex: q, $options: "i" } },
+      { description: { $regex: q, $options: "i" } },
+    ];
+  }
+
+  const sort =
+    sort_by === "date_asc" ? { transaction_date: 1 } : { transaction_date: -1 };
+
+  const isCsv = req.header("Accept") === "text/csv";
+
+  if (isCsv) {
+    const transactions = await Transaction.find(filter)
+      .sort(sort)
+      .populate("partner_id", "name")
+      .populate("recorded_by", "name email");
+
+    const csvHeader =
+      "ID,Partner,Amount,Currency,Category,Context,Date,Recorded By,Created At\n";
+    const csvRows = transactions
+      .map((t) =>
+        [
+          t._id.toString(),
+          t.partner_id?.name || "",
+          t.amount,
+          t.currency,
+          t.category || "",
+          t.context || "",
+          t.transaction_date?.toISOString() || "",
+          t.recorded_by?.name || "",
+          t.created_at.toISOString(),
+        ].join(",")
+      )
+      .join("\n");
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=transactions.csv"
+    );
+    return res.send(csvHeader + csvRows);
+  }
+
+  const total = await Transaction.countDocuments(filter);
+
+  const transactions = await Transaction.find(filter)
+    .sort(sort)
+    .skip(finalOffset)
+    .limit(finalLimit)
+    .populate("partner_id", "name avatar_url")
+    .populate("recorded_by", "name email");
+
+  const formattedTransactions = transactions.map((t) => ({
+    id: t._id.toString(),
+    recorded_for: t.partner_id?._id?.toString(),
+    recorded_for_name: t.partner_id?.name,
+    recorded_by: t.recorded_by?._id?.toString(),
+    amount: Math.abs(t.amount),
+    currency: t.currency,
+    type: t.type,
+    category: t.category,
+    context: t.context,
+    date: t.transaction_date,
+    created_at: t.created_at,
+  }));
+
+  res.status(200).json({
+    data: formattedTransactions,
+    meta: {
+      total,
+      page: parseInt(page),
+      per_page: finalLimit,
+    },
+  });
+});

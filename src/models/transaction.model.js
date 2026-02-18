@@ -60,7 +60,11 @@ const transactionSchema = new Schema(
   }
 );
 
-transactionSchema.index({ partner_id: 1, created_at: -1 });
+transactionSchema.index({ partner_id: 1, transaction_date: -1 });
+transactionSchema.index({ recorded_by: 1 });
+transactionSchema.index({ category: 1 });
+transactionSchema.index({ transaction_date: -1 });
+transactionSchema.index({ context: "text", description: "text" });
 
 const Transaction = mongoose.model("Transaction", transactionSchema);
 
