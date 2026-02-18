@@ -765,3 +765,107 @@ export const undoTransaction = asyncHandlers(async (req, res) => {
     partner_total: updatedPartner.total_contributed,
   });
 });
+
+export const getLeaderboard = asyncHandlers(async (req, res) => {
+  const { limit = 10, include_recent_transactions } = req.query;
+
+  const finalLimit = parseInt(limit) || 10;
+
+  const pipeline = [
+    {
+      $lookup: {
+        from: "transactions",
+        let: { partnerId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $eq: ["$partner_id", "$$partnerId"] },
+              type: "contribution",
+            },
+          },
+          { $sort: { created_at: -1 } },
+          { $limit: 1 },
+        ],
+        as: "last_contribution_lookup",
+      },
+    },
+    {
+      $addFields: {
+        last_contribution_at: {
+          $cond: {
+            if: { $gt: [{ $size: "$last_contribution_lookup" }, 0] },
+            then: { $arrayElemAt: ["$last_contribution_lookup.created_at", 0] },
+            else: null,
+          },
+        },
+      },
+    },
+    {
+      $sort: {
+        total_contributed: -1,
+        last_contribution_at: -1,
+      },
+    },
+    { $limit: finalLimit },
+    {
+      $project: {
+        last_contribution_lookup: 0,
+      },
+    },
+  ];
+
+  if (include_recent_transactions === "true") {
+    pipeline[0].$lookup.pipeline.push({ $limit: 5 });
+    pipeline[4].$project.recent_transactions = {
+      $map: {
+        input: "$last_contribution_lookup",
+        as: "t",
+        in: {
+          id: "$$t._id",
+          amount: "$$t.amount",
+          type: "$$t.type",
+          description: "$$t.description",
+          created_at: "$$t.created_at",
+        },
+      },
+    };
+  }
+
+  const leaderboard = await Partner.aggregate(pipeline);
+
+  let rank = 0;
+  let previousTotal = null;
+
+  const formattedLeaderboard = leaderboard.map((partner, index) => {
+    if (partner.total_contributed !== previousTotal) {
+      rank = index + 1;
+      previousTotal = partner.total_contributed;
+    }
+
+    return {
+      partner_id: partner._id.toString(),
+      name: partner.name,
+      avatar_url: partner.avatar_url,
+      total_contributed: partner.total_contributed,
+      rank,
+      top_contributor: rank === 1,
+      last_contribution_at: partner.last_contribution_at,
+      ...(include_recent_transactions === "true" && {
+        recent_transactions: partner.recent_transactions?.map((t) => ({
+          id: t.id?.toString(),
+          amount: t.amount,
+          type: t.type,
+          description: t.description,
+          created_at: t.created_at,
+        })),
+      }),
+    };
+  });
+
+  res.status(200).json({
+    data: formattedLeaderboard,
+    meta: {
+      as_of: new Date().toISOString(),
+    },
+  });
+});
