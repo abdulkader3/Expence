@@ -501,3 +501,42 @@ export const listTransactions = asyncHandlers(async (req, res) => {
     },
   });
 });
+
+export const getTransactionDetail = asyncHandlers(async (req, res) => {
+  const { transaction_id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(transaction_id)) {
+    throw new ApiErrors(404, "Transaction not found");
+  }
+
+  const transaction = await Transaction.findById(transaction_id)
+    .populate("partner_id", "name avatar_url email")
+    .populate("recorded_by", "name email");
+
+  if (!transaction) {
+    throw new ApiErrors(404, "Transaction not found");
+  }
+
+  res.status(200).json({
+    transaction: {
+      id: transaction._id.toString(),
+      recorded_for: transaction.partner_id?._id?.toString(),
+      recorded_for_name: transaction.partner_id?.name,
+      recorded_for_email: transaction.partner_id?.email,
+      recorded_by: transaction.recorded_by?._id?.toString(),
+      recorded_by_name: transaction.recorded_by?.name,
+      recorded_by_email: transaction.recorded_by?.email,
+      amount: Math.abs(transaction.amount),
+      currency: transaction.currency,
+      type: transaction.type,
+      category: transaction.category,
+      context: transaction.context,
+      description: transaction.description,
+      receipt_url: transaction.receipt_url,
+      receipt_id: transaction.receipt_id,
+      date: transaction.transaction_date,
+      created_at: transaction.created_at,
+      updated_at: transaction.updated_at,
+    },
+  });
+});
