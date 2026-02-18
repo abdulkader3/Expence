@@ -5,6 +5,7 @@ import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import partnerRoutes from "./routes/partner.routes.js";
 import transactionRoutes from "./routes/transaction.routes.js";
+import uploadRoutes from "./routes/upload.routes.js";
 import { ApiErrors } from "./utils/ApiErrors.js";
 
 const app = express();
@@ -34,6 +35,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/partners", partnerRoutes);
 app.use("/api/v1/transactions", transactionRoutes);
+app.use("/api/v1/uploads", uploadRoutes);
 
 // Route
 
@@ -48,9 +50,18 @@ app.use((err, req, res, next) => {
     });
   }
 
+  if (err.code === "LIMIT_FILE_SIZE") {
+    return res.status(413).json({
+      success: false,
+      message: "File too large. Maximum size is 8MB",
+      errors: [],
+      data: null,
+    });
+  }
+
   return res.status(500).json({
     success: false,
-    message: "Internal server error",
+    message: err.message || "Internal server error",
     errors: [],
     data: null,
   });
