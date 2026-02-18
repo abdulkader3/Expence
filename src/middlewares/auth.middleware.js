@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import { ApiErrors } from "../utils/ApiErrors.js";
-import { User } from "../models/user.model.js";
+import User from "../models/user.model.js";
 import { asyncHandlers } from "../utils/asyncHandlers.js";
 
 export const verifyJWT = asyncHandlers(async (req, res, next) => {
@@ -12,7 +12,7 @@ export const verifyJWT = asyncHandlers(async (req, res, next) => {
     // If no Authorization header, check for accessToken in cookies
     if (!token) {
       token = req.cookies?.accessToken;
-      isAccessToken = true;  // Cookie accessToken is still an access token
+      isAccessToken = true; // Cookie accessToken is still an access token
     }
 
     // If still no token, check for refresh token in cookies
@@ -32,8 +32,8 @@ export const verifyJWT = asyncHandlers(async (req, res, next) => {
 
     const decodedToken = jwt.verify(token, secret);
 
-    const user = await User.findById(decodedToken?._id).select(
-      "-password -refreshToken"
+    const user = await User.findById(decodedToken?.id).select(
+      "-password_hash -refresh_token"
     );
 
     if (!user) {
@@ -51,11 +51,11 @@ export const verifyAdmin = asyncHandlers(async (req, res, next) => {
   try {
     // Verify token directly (don't call verifyJWT as middleware)
     let token = req.header("Authorization")?.replace("Bearer ", "");
-    
+
     if (!token) {
       token = req.cookies?.accessToken;
     }
-    
+
     if (!token) {
       throw new ApiErrors(401, "unauthorized request");
     }
@@ -69,8 +69,10 @@ export const verifyAdmin = asyncHandlers(async (req, res, next) => {
     console.log("Token payload role:", decodedToken.role);
 
     // Fetch user to verify they exist and get full details
-    const user = await User.findById(decodedToken._id).select("-password -refreshToken");
-    
+    const user = await User.findById(decodedToken._id).select(
+      "-password -refreshToken"
+    );
+
     if (!user) {
       console.log("❌ User not found in database");
       throw new ApiErrors(401, "User not found");
@@ -82,17 +84,17 @@ export const verifyAdmin = asyncHandlers(async (req, res, next) => {
 
     // Check if user has admin or developer_admin role
     const userRole = user.role || decodedToken.role;
-    
-    if (userRole !== 'admin' && userRole !== 'developer_admin') {
+
+    if (userRole !== "admin" && userRole !== "developer_admin") {
       console.log("❌ Access denied - role:", userRole);
       throw new ApiErrors(403, "Access denied. Admin privileges required.");
     }
 
     console.log("✅ Admin access granted - role:", userRole);
-    
+
     // Set req.user for downstream use
     req.user = user;
-    
+
     next();
   } catch (error) {
     console.log("❌ Admin verification error:", error.message);

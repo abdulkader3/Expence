@@ -40,6 +40,26 @@ const userSchema = new Schema(
       type: Date,
       default: null,
     },
+    locked_at: {
+      type: Date,
+      default: null,
+    },
+    failed_login_attempts: {
+      type: Number,
+      default: 0,
+    },
+    lock_expires_at: {
+      type: Date,
+      default: null,
+    },
+    avatar_url: {
+      type: String,
+      default: null,
+    },
+    roles: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true,

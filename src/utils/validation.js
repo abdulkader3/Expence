@@ -40,3 +40,19 @@ export const validateRegistration = (data) => {
 
   return errors;
 };
+
+export const validateLogin = (data) => {
+  const errors = [];
+
+  if (!data.email || typeof data.email !== "string") {
+    errors.push({ field: "email", message: "Email is required" });
+  } else if (!/^\S+@\S+\.\S+$/.test(data.email)) {
+    errors.push({ field: "email", message: "Please provide a valid email" });
+  }
+
+  if (!data.password || typeof data.password !== "string") {
+    errors.push({ field: "password", message: "Password is required" });
+  }
+
+  return errors;
+};

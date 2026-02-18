@@ -2,6 +2,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import authRoutes from "./routes/auth.routes.js";
+import userRoutes from "./routes/user.routes.js";
 import { ApiErrors } from "./utils/ApiErrors.js";
 
 const app = express();
@@ -28,6 +29,7 @@ app.get("/health", (req, res) => {
 
 // Import Router
 app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/users", userRoutes);
 
 // Route
 
