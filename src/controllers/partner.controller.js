@@ -926,3 +926,207 @@ export const exportTransactionsCSV = asyncHandlers(async (req, res) => {
 
   res.end();
 });
+
+export const syncOfflineQueue = asyncHandlers(async (req, res) => {
+  const { device_id, queue } = req.body;
+
+  if (!device_id) {
+    throw new ApiErrors(400, "device_id is required");
+  }
+
+  if (!queue || !Array.isArray(queue) || queue.length === 0) {
+    throw new ApiErrors(400, "queue must be a non-empty array");
+  }
+
+  const results = [];
+
+  for (const item of queue) {
+    const { local_id, action, payload, timestamp, idempotency_key } = item;
+
+    if (!local_id || !action || !payload) {
+      results.push({
+        local_id: local_id || "unknown",
+        status: "error",
+        error: "Missing required fields: local_id, action, payload",
+      });
+      continue;
+    }
+
+    const dedupKey = idempotency_key || local_id;
+
+    try {
+      if (action === "addContribution") {
+        const existing = await Transaction.findOne({
+          idempotency_key: dedupKey,
+        });
+
+        if (existing) {
+          results.push({
+            local_id,
+            status: "ok",
+            server_id: existing._id.toString(),
+            duplicate: true,
+          });
+          continue;
+        }
+
+        if (!payload.recorded_for || !payload.amount) {
+          results.push({
+            local_id,
+            status: "error",
+            error: "Missing required payload fields: recorded_for, amount",
+          });
+          continue;
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(payload.recorded_for)) {
+          results.push({
+            local_id,
+            status: "error",
+            error: "Invalid partner ID format",
+          });
+          continue;
+        }
+
+        const partner = await Partner.findById(payload.recorded_for);
+        if (!partner) {
+          results.push({
+            local_id,
+            status: "error",
+            error: "Partner not found",
+          });
+          continue;
+        }
+
+        const transaction = await Transaction.create({
+          partner_id: partner._id,
+          amount: payload.amount,
+          type: "contribution",
+          category: payload.category || null,
+          context: payload.context || null,
+          receipt_id: payload.receipt_id || null,
+          currency: payload.currency || "BDT",
+          transaction_date: timestamp ? new Date(timestamp) : new Date(),
+          recorded_by: req.user._id,
+          idempotency_key: dedupKey,
+        });
+
+        await Partner.findByIdAndUpdate(partner._id, {
+          $inc: { total_contributed: payload.amount },
+        });
+
+        results.push({
+          local_id,
+          status: "ok",
+          server_id: transaction._id.toString(),
+        });
+      } else if (action === "undoTransaction") {
+        const existing = await Transaction.findOne({
+          idempotency_key: dedupKey,
+        });
+
+        if (existing) {
+          results.push({
+            local_id,
+            status: "ok",
+            server_id: existing._id.toString(),
+            duplicate: true,
+          });
+          continue;
+        }
+
+        if (!payload.transaction_id) {
+          results.push({
+            local_id,
+            status: "error",
+            error: "Missing required payload field: transaction_id",
+          });
+          continue;
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(payload.transaction_id)) {
+          results.push({
+            local_id,
+            status: "error",
+            error: "Invalid transaction ID format",
+          });
+          continue;
+        }
+
+        const originalTransaction = await Transaction.findById(
+          payload.transaction_id
+        );
+        if (!originalTransaction) {
+          results.push({
+            local_id,
+            status: "error",
+            error: "Original transaction not found",
+          });
+          continue;
+        }
+
+        const existingUndo = await Transaction.findOne({
+          related_to: payload.transaction_id,
+        });
+        if (existingUndo) {
+          results.push({
+            local_id,
+            status: "ok",
+            server_id: existingUndo._id.toString(),
+            duplicate: true,
+          });
+          continue;
+        }
+
+        const undoTransaction = await Transaction.create({
+          partner_id: originalTransaction.partner_id,
+          amount: -Math.abs(originalTransaction.amount),
+          type: "undo",
+          description: payload.reason
+            ? `Undo reason: ${payload.reason}`
+            : `Undo of transaction ${payload.transaction_id}`,
+          category: originalTransaction.category,
+          context: originalTransaction.context,
+          currency: originalTransaction.currency,
+          transaction_date: timestamp ? new Date(timestamp) : new Date(),
+          recorded_by: req.user._id,
+          related_to: originalTransaction._id,
+          idempotency_key: dedupKey,
+        });
+
+        await Partner.findByIdAndUpdate(originalTransaction.partner_id, {
+          $inc: { total_contributed: -Math.abs(originalTransaction.amount) },
+        });
+
+        results.push({
+          local_id,
+          status: "ok",
+          server_id: undoTransaction._id.toString(),
+        });
+      } else {
+        results.push({
+          local_id,
+          status: "error",
+          error: `Unknown action: ${action}`,
+        });
+      }
+    } catch (error) {
+      results.push({
+        local_id,
+        status: "error",
+        error: error.message || "Unknown error",
+      });
+    }
+  }
+
+  const successCount = results.filter((r) => r.status === "ok").length;
+
+  res.status(200).json({
+    results,
+    summary: {
+      total: queue.length,
+      success: successCount,
+      failed: queue.length - successCount,
+    },
+  });
+});
