@@ -20,16 +20,47 @@ const transactionSchema = new Schema(
       type: String,
       default: null,
     },
+    category: {
+      type: String,
+      default: null,
+    },
+    context: {
+      type: String,
+      default: null,
+    },
+    receipt_url: {
+      type: String,
+      default: null,
+    },
+    receipt_id: {
+      type: String,
+      default: null,
+    },
+    currency: {
+      type: String,
+      default: "BDT",
+    },
+    transaction_date: {
+      type: Date,
+      default: null,
+    },
     recorded_by: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: [true, "Recorded by user is required"],
+    },
+    idempotency_key: {
+      type: String,
+      default: null,
+      index: true,
     },
   },
   {
     timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
   }
 );
+
+transactionSchema.index({ partner_id: 1, created_at: -1 });
 
 const Transaction = mongoose.model("Transaction", transactionSchema);
 

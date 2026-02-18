@@ -4,6 +4,7 @@ import cors from "cors";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import partnerRoutes from "./routes/partner.routes.js";
+import transactionRoutes from "./routes/transaction.routes.js";
 import { ApiErrors } from "./utils/ApiErrors.js";
 
 const app = express();
@@ -32,6 +33,7 @@ app.get("/health", (req, res) => {
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/partners", partnerRoutes);
+app.use("/api/v1/transactions", transactionRoutes);
 
 // Route
 
