@@ -9,6 +9,24 @@ import uploadRoutes from "./routes/upload.routes.js";
 import exportRoutes from "./routes/export.routes.js";
 import syncRoutes from "./routes/sync.routes.js";
 import { ApiErrors } from "./utils/ApiErrors.js";
+import mongoose from "mongoose";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const getVersion = () => {
+  try {
+    const packageJson = JSON.parse(
+      readFileSync(join(__dirname, "../package.json"), "utf8")
+    );
+    return packageJson.version || "1.0.0";
+  } catch {
+    return "1.0.0";
+  }
+};
 
 const app = express();
 
@@ -26,9 +44,16 @@ app.use(cookieParser());
 
 // Health check endpoint - lightweight, no DB queries
 app.get("/health", (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  const dbStatus =
+    dbState === 1 ? "ok" : dbState === 2 ? "connecting" : "disconnected";
+
   res.status(200).json({
     status: "ok",
-    uptime: process.uptime(),
+    uptime: Math.floor(process.uptime()),
+    db: dbStatus,
+    queue: { pending: 0 },
+    version: getVersion(),
   });
 });
 
