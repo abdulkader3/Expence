@@ -6,6 +6,107 @@ Auth: Cookies (accessToken, refreshToken) - automatically handled after login
 
 ---
 
+## POST /auth/register - Register User
+
+### Test 1: Valid Registration → 201
+
+1. **Method:** POST
+2. **URL:** http://localhost:5000/api/v1/auth/register
+3. **Body (JSON):**
+
+```json
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "password": "password123",
+  "phone": "+1234567890",
+  "company": "Acme Inc"
+}
+```
+
+4. **Send Request**
+5. **Expected Response (201):**
+
+```json
+{
+  "success": true,
+  "message": "User registered successfully",
+  "data": {
+    "user": {
+      "id": "uuid",
+      "name": "John Doe",
+      "email": "john@example.com",
+      "phone": "+1234567890",
+      "company": "Acme Inc",
+      "avatar_url": null,
+      "created_at": "ISO8601"
+    },
+    "tokens": {
+      "access_token": "eyJhbGciOiJIUzI1...",
+      "refresh_token": "eyJhbGciOiJIUzI1..."
+    }
+  }
+}
+```
+
+### Test 2: Duplicate Email → 409
+
+1. **Method:** POST
+2. **URL:** http://localhost:5000/api/v1/auth/register
+3. **Body (JSON):**
+
+```json
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "password": "password123"
+}
+```
+
+4. **Send Request**
+5. **Expected Response (409):**
+
+```json
+{
+  "success": false,
+  "message": "Email already registered",
+  "errors": [],
+  "data": null
+}
+```
+
+### Test 3: Invalid Input → 400
+
+1. **Method:** POST
+2. **URL:** http://localhost:5000/api/v1/auth/register
+3. **Body (JSON):**
+
+```json
+{
+  "name": "A",
+  "email": "notanemail",
+  "password": "short"
+}
+```
+
+4. **Send Request**
+5. **Expected Response (400):**
+
+```json
+{
+  "success": false,
+  "message": "Validation failed",
+  "errors": [
+    { "field": "name", "message": "Name must be at least 2 characters" },
+    { "field": "email", "message": "Please provide a valid email" },
+    { "field": "password", "message": "Password must be at least 8 characters" }
+  ],
+  "data": null
+}
+```
+
+---
+
 ## GET /users/me - Get Profile
 
 ### Test 1: Valid Token → Profile (200)
