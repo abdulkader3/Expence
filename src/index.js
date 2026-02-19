@@ -7,8 +7,9 @@ dotenv.config("./.env");
 connectDB()
   .then(() => {
     const PORT = process.env.PORT || 4000;
-    app.listen(PORT, () => {
-      console.log(`app listening on port http://localhost:${PORT}`);
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://0.0.0.0:${PORT}`);
+      console.log(`Health check: http://localhost:${PORT}/health`);
     });
   })
 
