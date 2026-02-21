@@ -28,6 +28,11 @@ const partnerSchema = new Schema(
       type: Number,
       default: 0,
     },
+    created_by: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
   },
   {
     timestamps: { createdAt: "created_at", updatedAt: "updated_at" },

@@ -8,6 +8,9 @@ import transactionRoutes from "./routes/transaction.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 import exportRoutes from "./routes/export.routes.js";
 import syncRoutes from "./routes/sync.routes.js";
+import saleRoutes from "./routes/sale.routes.js";
+import costEntryRoutes from "./routes/costEntry.routes.js";
+import allocationRoutes from "./routes/allocation.routes.js";
 import { ApiErrors } from "./utils/ApiErrors.js";
 import mongoose from "mongoose";
 import { readFileSync } from "fs";
@@ -65,6 +68,9 @@ app.use("/api/v1/transactions", transactionRoutes);
 app.use("/api/v1/uploads", uploadRoutes);
 app.use("/api/v1/exports", exportRoutes);
 app.use("/api/v1/sync", syncRoutes);
+app.use("/api/v1/sales", saleRoutes);
+app.use("/api/v1/cost-entries", costEntryRoutes);
+app.use("/api/v1/allocations", allocationRoutes);
 
 // Route
 

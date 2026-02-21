@@ -1,9 +1,97 @@
 import Partner from "../models/partner.model.js";
 import Transaction from "../models/transaction.model.js";
+import User from "../models/user.model.js";
 import mongoose from "mongoose";
 import { asyncHandlers } from "../utils/asyncHandlers.js";
 import { ApiErrors } from "../utils/ApiErrors.js";
 import { UploadOnCloudinary } from "../utils/Cloudinary.js";
+
+export const createNewPartner = asyncHandlers(async (req, res) => {
+  const { name, email, notes } = req.body;
+
+  if (!name || typeof name !== "string" || name.trim().length < 2) {
+    throw new ApiErrors(
+      400,
+      "Name is required and must be at least 2 characters"
+    );
+  }
+
+  if (email) {
+    const existingPartner = await Partner.findOne({
+      email: email.toLowerCase(),
+    });
+    if (existingPartner) {
+      throw new ApiErrors(409, "A partner with this email already exists");
+    }
+  }
+
+  const partner = await Partner.create({
+    name: name.trim(),
+    email: email ? email.toLowerCase().trim() : null,
+    notes: notes || null,
+    created_by: req.user._id,
+  });
+
+  res.status(201).json({
+    partner: {
+      id: partner._id.toString(),
+      name: partner.name,
+      email: partner.email,
+      avatar_url: partner.avatar_url,
+      notes: partner.notes,
+      total_contributed: partner.total_contributed,
+      created_by: partner.created_by?.toString(),
+      created_at: partner.createdAt,
+    },
+  });
+});
+
+export const createSelfPartner = asyncHandlers(async (req, res) => {
+  const user = await User.findById(req.user._id);
+
+  if (!user) {
+    throw new ApiErrors(404, "User not found");
+  }
+
+  let partner = await Partner.findOne({ created_by: req.user._id });
+
+  if (partner) {
+    return res.status(200).json({
+      partner: {
+        id: partner._id.toString(),
+        name: partner.name,
+        email: partner.email,
+        avatar_url: partner.avatar_url,
+        notes: partner.notes,
+        total_contributed: partner.total_contributed,
+        created_by: partner.created_by?.toString(),
+        created_at: partner.createdAt,
+      },
+      already_exists: true,
+    });
+  }
+
+  partner = await Partner.create({
+    name: user.name,
+    email: user.email,
+    avatar_url: user.avatar_url,
+    created_by: req.user._id,
+  });
+
+  res.status(201).json({
+    partner: {
+      id: partner._id.toString(),
+      name: partner.name,
+      email: partner.email,
+      avatar_url: partner.avatar_url,
+      notes: partner.notes,
+      total_contributed: partner.total_contributed,
+      created_by: partner.created_by?.toString(),
+      created_at: partner.createdAt,
+    },
+    already_exists: false,
+  });
+});
 
 export const listPartners = asyncHandlers(async (req, res) => {
   const {
