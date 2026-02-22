@@ -125,7 +125,7 @@ export const listSales = asyncHandlers(async (req, res) => {
   const finalLimit = parseInt(per_page) || 10;
   const finalOffset = (parseInt(page) - 1) * finalLimit;
 
-  const filter = { user_id: req.user._id };
+  const filter = {};
 
   if (from || to) {
     filter.date = {};
@@ -185,7 +185,7 @@ export const listSales = asyncHandlers(async (req, res) => {
 export const getSaleDetail = asyncHandlers(async (req, res) => {
   const { sale_id } = req.params;
 
-  const sale = await Sale.findOne({ _id: sale_id, user_id: req.user._id });
+  const sale = await Sale.findOne({ _id: sale_id });
 
   if (!sale) {
     throw new ApiErrors(404, "Sale not found");
@@ -193,7 +193,6 @@ export const getSaleDetail = asyncHandlers(async (req, res) => {
 
   const allocations = await Allocation.find({
     sale_id: sale._id,
-    user_id: req.user._id,
   });
 
   const allocated_cost_total = allocations.reduce(

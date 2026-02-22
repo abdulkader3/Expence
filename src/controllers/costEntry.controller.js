@@ -66,7 +66,7 @@ export const listCostEntries = asyncHandlers(async (req, res) => {
   const finalLimit = parseInt(per_page) || 10;
   const finalOffset = (parseInt(page) - 1) * finalLimit;
 
-  const filter = { user_id: req.user._id };
+  const filter = {};
 
   if (from || to) {
     filter.date = {};
@@ -121,7 +121,6 @@ export const getCostEntryDetail = asyncHandlers(async (req, res) => {
 
   const costEntry = await CostEntry.findOne({
     _id: cost_id,
-    user_id: req.user._id,
   });
 
   if (!costEntry) {

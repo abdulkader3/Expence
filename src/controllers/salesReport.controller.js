@@ -23,7 +23,6 @@ export const getSalesSummary = asyncHandlers(async (req, res) => {
   const salesPipeline = [
     {
       $match: {
-        user_id: userId,
         status: "completed",
         date: { $gte: fromDate, $lte: toDate },
       },
@@ -81,7 +80,6 @@ export const getSalesSummary = asyncHandlers(async (req, res) => {
   const allocationsPipeline = [
     {
       $match: {
-        user_id: userId,
         sale_id: { $in: sale_ids },
       },
     },
