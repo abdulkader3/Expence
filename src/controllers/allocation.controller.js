@@ -1,12 +1,13 @@
 import Allocation from "../models/allocation.model.js";
 import Sale from "../models/sale.model.js";
 import CostEntry from "../models/costEntry.model.js";
+import CostTemplate from "../models/costTemplate.model.js";
 import mongoose from "mongoose";
 import { asyncHandlers } from "../utils/asyncHandlers.js";
 import { ApiErrors } from "../utils/ApiErrors.js";
 
 export const createAllocation = asyncHandlers(async (req, res) => {
-  const { sale_id, cost_id, allocated_amount } = req.body;
+  const { sale_id, cost_id, cost_template_id, allocated_amount } = req.body;
 
   const errors = [];
 
@@ -16,10 +17,29 @@ export const createAllocation = asyncHandlers(async (req, res) => {
     errors.push({ field: "sale_id", message: "Invalid Sale ID format" });
   }
 
-  if (!cost_id) {
-    errors.push({ field: "cost_id", message: "Cost ID is required" });
-  } else if (!mongoose.Types.ObjectId.isValid(cost_id)) {
-    errors.push({ field: "cost_id", message: "Invalid Cost ID format" });
+  if (!cost_id && !cost_template_id) {
+    errors.push({
+      field: "cost",
+      message: "Either cost_id or cost_template_id is required",
+    });
+  }
+
+  if (cost_id && cost_template_id) {
+    errors.push({
+      field: "cost",
+      message: "Cannot specify both cost_id and cost_template_id",
+    });
+  }
+
+  if (cost_id && !mongoose.Types.ObjectId.isValid(cost_id)) {
+    errors.push({ field: "cost_id", message: "Invalid cost ID format" });
+  }
+
+  if (cost_template_id && !mongoose.Types.ObjectId.isValid(cost_template_id)) {
+    errors.push({
+      field: "cost_template_id",
+      message: "Invalid cost template ID format",
+    });
   }
 
   if (allocated_amount === undefined || allocated_amount === null) {
@@ -43,50 +63,88 @@ export const createAllocation = asyncHandlers(async (req, res) => {
     throw new ApiErrors(404, "Sale not found or does not belong to user");
   }
 
-  const costEntry = await CostEntry.findOne({
-    _id: cost_id,
-    user_id: req.user._id,
-  });
-  if (!costEntry) {
-    throw new ApiErrors(404, "Cost entry not found or does not belong to user");
+  let costEntry = null;
+  let costTemplate = null;
+
+  if (cost_id) {
+    costEntry = await CostEntry.findOne({
+      _id: cost_id,
+      user_id: req.user._id,
+    });
+    if (!costEntry) {
+      throw new ApiErrors(
+        404,
+        "Cost entry not found or does not belong to user"
+      );
+    }
+
+    const remainingAmount = costEntry.total_cost - costEntry.allocated_amount;
+    if (allocated_amount > remainingAmount) {
+      throw new ApiErrors(
+        400,
+        `Allocated amount exceeds remaining unallocated amount. Maximum allowed: ${remainingAmount}`
+      );
+    }
   }
 
-  const remainingAmount = costEntry.total_cost - costEntry.allocated_amount;
-  if (allocated_amount > remainingAmount) {
-    throw new ApiErrors(
-      400,
-      `Allocated amount exceeds remaining unallocated amount. Maximum allowed: ${remainingAmount}`
-    );
+  if (cost_template_id) {
+    costTemplate = await CostTemplate.findOne({
+      _id: cost_template_id,
+      user_id: req.user._id,
+    });
+    if (!costTemplate) {
+      throw new ApiErrors(
+        404,
+        "Cost template not found or does not belong to user"
+      );
+    }
+    if (!costTemplate.is_active) {
+      throw new ApiErrors(400, "Cost template is inactive");
+    }
   }
 
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const allocation = await Allocation.create(
-      [
-        {
-          user_id: req.user._id,
-          sale_id,
-          cost_id,
-          allocated_amount,
-        },
-      ],
-      { session }
-    );
+    const allocationData = {
+      user_id: req.user._id,
+      sale_id,
+      allocated_amount,
+    };
 
-    await CostEntry.findByIdAndUpdate(
-      cost_id,
-      {
-        $inc: { allocated_amount: allocated_amount },
-      },
-      { session }
-    );
+    if (cost_id) {
+      allocationData.cost_id = cost_id;
+    } else {
+      allocationData.cost_template_id = cost_template_id;
+    }
+
+    const allocation = await Allocation.create([allocationData], { session });
+
+    if (costEntry) {
+      await CostEntry.findByIdAndUpdate(
+        cost_id,
+        {
+          $inc: { allocated_amount: allocated_amount },
+        },
+        { session }
+      );
+    }
 
     await session.commitTransaction();
     session.endSession();
 
-    const updatedCostEntry = await CostEntry.findById(cost_id);
+    const responseData = {
+      allocation: {
+        id: allocation[0]._id.toString(),
+        user_id: allocation[0].user_id.toString(),
+        sale_id: allocation[0].sale_id.toString(),
+        cost_id: allocation[0].cost_id?.toString() || null,
+        cost_template_id: allocation[0].cost_template_id?.toString() || null,
+        allocated_amount: allocation[0].allocated_amount,
+        created_at: allocation[0].created_at,
+      },
+    };
 
     const allocations = await Allocation.find({
       sale_id,
@@ -97,27 +155,31 @@ export const createAllocation = asyncHandlers(async (req, res) => {
       0
     );
 
-    res.status(201).json({
-      allocation: {
-        id: allocation[0]._id.toString(),
-        user_id: allocation[0].user_id.toString(),
-        sale_id: allocation[0].sale_id.toString(),
-        cost_id: allocation[0].cost_id.toString(),
-        allocated_amount: allocation[0].allocated_amount,
-        created_at: allocation[0].created_at,
-      },
-      sale_summary: {
-        sale_id: sale._id.toString(),
-        total_allocated_cost: totalAllocatedCost,
-      },
-      cost_entry_summary: {
+    responseData.sale_summary = {
+      sale_id: sale._id.toString(),
+      total_allocated_cost: totalAllocatedCost,
+    };
+
+    if (costEntry) {
+      const updatedCostEntry = await CostEntry.findById(cost_id);
+      responseData.cost_entry_summary = {
         cost_id: costEntry._id.toString(),
         total_cost: costEntry.total_cost,
         allocated_amount: updatedCostEntry.allocated_amount,
         remaining_unallocated_cost:
-          updatedCostEntry.total_cost - updatedCostEntry.allocated_amount,
-      },
-    });
+          costEntry.total_cost - updatedCostEntry.allocated_amount,
+      };
+    }
+
+    if (costTemplate) {
+      responseData.cost_template_summary = {
+        cost_template_id: costTemplate._id.toString(),
+        name: costTemplate.name,
+        unit_cost: costTemplate.unit_cost,
+      };
+    }
+
+    res.status(201).json(responseData);
   } catch (error) {
     await session.abortTransaction();
     session.endSession();

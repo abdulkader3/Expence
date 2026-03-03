@@ -11,6 +11,7 @@ import syncRoutes from "./routes/sync.routes.js";
 import saleRoutes from "./routes/sale.routes.js";
 import costEntryRoutes from "./routes/costEntry.routes.js";
 import allocationRoutes from "./routes/allocation.routes.js";
+import costTemplateRoutes from "./routes/costTemplate.routes.js";
 import { ApiErrors } from "./utils/ApiErrors.js";
 import mongoose from "mongoose";
 import { readFileSync } from "fs";
@@ -71,6 +72,7 @@ app.use("/api/v1/sync", syncRoutes);
 app.use("/api/v1/sales", saleRoutes);
 app.use("/api/v1/cost-entries", costEntryRoutes);
 app.use("/api/v1/allocations", allocationRoutes);
+app.use("/api/v1/cost-templates", costTemplateRoutes);
 
 // Route
 

@@ -15,7 +15,10 @@ const allocationSchema = new Schema(
     cost_id: {
       type: Schema.Types.ObjectId,
       ref: "CostEntry",
-      required: [true, "Cost ID is required"],
+    },
+    cost_template_id: {
+      type: Schema.Types.ObjectId,
+      ref: "CostTemplate",
     },
     allocated_amount: {
       type: Number,
@@ -36,8 +39,19 @@ const allocationSchema = new Schema(
   }
 );
 
+allocationSchema.pre("save", function (next) {
+  if (!this.cost_id && !this.cost_template_id) {
+    throw new Error("Either cost_id or cost_template_id is required");
+  }
+  if (this.cost_id && this.cost_template_id) {
+    throw new Error("Cannot specify both cost_id and cost_template_id");
+  }
+  next();
+});
+
 allocationSchema.index({ user_id: 1, sale_id: 1 });
 allocationSchema.index({ user_id: 1, cost_id: 1 });
+allocationSchema.index({ user_id: 1, cost_template_id: 1 });
 
 const Allocation = mongoose.model("Allocation", allocationSchema);
 
