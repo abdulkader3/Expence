@@ -6,8 +6,36 @@ import mongoose from "mongoose";
 import { asyncHandlers } from "../utils/asyncHandlers.js";
 import { ApiErrors } from "../utils/ApiErrors.js";
 
+const DEBUG = process.env.NODE_ENV !== "production";
+
+const debugLog = (message, data) => {
+  if (DEBUG) {
+    console.log(
+      `[DEBUG][ALLOCATION] ${new Date().toISOString()} - ${message}`,
+      data ? JSON.stringify(data, null, 2) : ""
+    );
+  }
+};
+
+const debugError = (message, error) => {
+  if (DEBUG) {
+    console.error(
+      `[DEBUG][ALLOCATION][ERROR] ${new Date().toISOString()} - ${message}`,
+      error.message || error
+    );
+  }
+};
+
 export const createAllocation = asyncHandlers(async (req, res) => {
   const { sale_id, cost_id, cost_template_id, allocated_amount } = req.body;
+
+  debugLog("Incoming allocation request", {
+    user_id: req.user._id,
+    sale_id,
+    cost_id,
+    cost_template_id,
+    allocated_amount,
+  });
 
   const errors = [];
 
@@ -55,8 +83,11 @@ export const createAllocation = asyncHandlers(async (req, res) => {
   }
 
   if (errors.length > 0) {
+    debugError("Validation failed", errors);
     throw new ApiErrors(400, "Validation failed", errors);
   }
+
+  debugLog("Validation passed, fetching sale and cost entry");
 
   const sale = await Sale.findOne({ _id: sale_id, user_id: req.user._id });
   if (!sale) {
@@ -78,8 +109,19 @@ export const createAllocation = asyncHandlers(async (req, res) => {
       );
     }
 
+    debugLog("Cost entry found before allocation", {
+      cost_id: costEntry._id,
+      total_cost: costEntry.total_cost,
+      allocated_amount: costEntry.allocated_amount,
+      remaining_amount: costEntry.total_cost - costEntry.allocated_amount,
+    });
+
     const remainingAmount = costEntry.total_cost - costEntry.allocated_amount;
     if (allocated_amount > remainingAmount) {
+      debugError("Allocation exceeds remaining amount", {
+        requested: allocated_amount,
+        remaining: remainingAmount,
+      });
       throw new ApiErrors(
         400,
         `Allocated amount exceeds remaining unallocated amount. Maximum allowed: ${remainingAmount}`
@@ -107,6 +149,8 @@ export const createAllocation = asyncHandlers(async (req, res) => {
   session.startTransaction();
 
   try {
+    debugLog("Starting transaction, creating allocation record");
+
     const allocationData = {
       user_id: req.user._id,
       sale_id,
@@ -121,7 +165,14 @@ export const createAllocation = asyncHandlers(async (req, res) => {
 
     const allocation = await Allocation.create([allocationData], { session });
 
+    debugLog("Allocation created", { allocation_id: allocation[0]._id });
+
     if (costEntry) {
+      debugLog("Updating cost entry allocated_amount with $inc", {
+        cost_id,
+        increment: allocated_amount,
+      });
+
       await CostEntry.findByIdAndUpdate(
         cost_id,
         {
@@ -129,10 +180,47 @@ export const createAllocation = asyncHandlers(async (req, res) => {
         },
         { session }
       );
+
+      debugLog("Fetching updated cost entry after $inc");
+
+      const costEntryAfterUpdate =
+        await CostEntry.findById(cost_id).session(session);
+
+      debugLog("Cost entry after allocation", {
+        cost_id: costEntryAfterUpdate._id,
+        total_cost: costEntryAfterUpdate.total_cost,
+        allocated_amount: costEntryAfterUpdate.allocated_amount,
+        remaining_amount:
+          costEntryAfterUpdate.total_cost -
+          costEntryAfterUpdate.allocated_amount,
+        current_status: costEntryAfterUpdate.status,
+      });
+
+      const remainingAfterAllocation =
+        costEntryAfterUpdate.total_cost - costEntryAfterUpdate.allocated_amount;
+
+      if (
+        remainingAfterAllocation <= 0 &&
+        costEntryAfterUpdate.status !== "fully_allocated"
+      ) {
+        debugLog(
+          "Cost is now fully allocated, updating status to 'fully_allocated'"
+        );
+
+        await CostEntry.findByIdAndUpdate(
+          cost_id,
+          { status: "fully_allocated" },
+          { session }
+        );
+
+        debugLog("Status updated to 'fully_allocated'");
+      }
     }
 
     await session.commitTransaction();
     session.endSession();
+
+    debugLog("Transaction committed successfully");
 
     const responseData = {
       allocation: {
@@ -168,7 +256,13 @@ export const createAllocation = asyncHandlers(async (req, res) => {
         allocated_amount: updatedCostEntry.allocated_amount,
         remaining_unallocated_cost:
           costEntry.total_cost - updatedCostEntry.allocated_amount,
+        status: updatedCostEntry.status,
       };
+
+      debugLog(
+        "Final cost_entry_summary in response",
+        responseData.cost_entry_summary
+      );
     }
 
     if (costTemplate) {
@@ -179,8 +273,11 @@ export const createAllocation = asyncHandlers(async (req, res) => {
       };
     }
 
+    debugLog("Sending successful response", responseData);
+
     res.status(201).json(responseData);
   } catch (error) {
+    debugError("Transaction failed, aborting", error);
     await session.abortTransaction();
     session.endSession();
     throw error;
