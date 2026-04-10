@@ -1,6 +1,7 @@
 import Sale from "../models/sale.model.js";
 import Allocation from "../models/allocation.model.js";
 import CostEntry from "../models/costEntry.model.js";
+import CostTemplate from "../models/costTemplate.model.js";
 import mongoose from "mongoose";
 import { asyncHandlers } from "../utils/asyncHandlers.js";
 import { ApiErrors } from "../utils/ApiErrors.js";
@@ -16,6 +17,8 @@ export const createSale = asyncHandlers(async (req, res) => {
     bank_name,
     cash_holder,
     date,
+    existing_allocation,
+    new_cost_allocation,
   } = req.body;
 
   const errors = [];
@@ -66,10 +69,121 @@ export const createSale = asyncHandlers(async (req, res) => {
   }
 
   if (payment_method === "bank") {
-    if (!bank_id && !bank_name) {
+    // Bank is optional - either bank_id, bank_name, or both can be provided
+    // if (!bank_id && !bank_name) {
+    //   errors.push({
+    //     field: "bank_id/bank_name",
+    //     message: "Bank ID or Bank name is required when payment method is bank",
+    //   });
+    // }
+  }
+
+  if (existing_allocation && new_cost_allocation) {
+    errors.push({
+      field: "allocation",
+      message:
+        "Cannot specify both existing_allocation and new_cost_allocation",
+    });
+  }
+
+  if (existing_allocation) {
+    if (!existing_allocation.cost_id) {
       errors.push({
-        field: "bank_id/bank_name",
-        message: "Bank ID or Bank name is required when payment method is bank",
+        field: "existing_allocation.cost_id",
+        message: "Cost ID is required for existing allocation",
+      });
+    }
+    if (!mongoose.Types.ObjectId.isValid(existing_allocation.cost_id)) {
+      errors.push({
+        field: "existing_allocation.cost_id",
+        message: "Invalid cost ID format",
+      });
+    }
+    if (
+      existing_allocation.allocation_quantity !== undefined &&
+      (typeof existing_allocation.allocation_quantity !== "number" ||
+        existing_allocation.allocation_quantity < 1)
+    ) {
+      errors.push({
+        field: "existing_allocation.allocation_quantity",
+        message: "Allocation quantity must be a positive number",
+      });
+    }
+    if (
+      existing_allocation.allocation_amount !== undefined &&
+      (typeof existing_allocation.allocation_amount !== "number" ||
+        existing_allocation.allocation_amount < 0)
+    ) {
+      errors.push({
+        field: "existing_allocation.allocation_amount",
+        message: "Allocation amount must be a positive number",
+      });
+    }
+  }
+
+  if (new_cost_allocation) {
+    if (
+      !new_cost_allocation.description ||
+      typeof new_cost_allocation.description !== "string" ||
+      new_cost_allocation.description.trim().length === 0
+    ) {
+      errors.push({
+        field: "new_cost_allocation.description",
+        message: "Description is required for new cost",
+      });
+    }
+    if (
+      new_cost_allocation.quantity === undefined ||
+      new_cost_allocation.quantity === null
+    ) {
+      errors.push({
+        field: "new_cost_allocation.quantity",
+        message: "Quantity is required for new cost",
+      });
+    } else if (
+      typeof new_cost_allocation.quantity !== "number" ||
+      new_cost_allocation.quantity < 1
+    ) {
+      errors.push({
+        field: "new_cost_allocation.quantity",
+        message: "Quantity must be at least 1",
+      });
+    }
+    if (
+      new_cost_allocation.unit_cost === undefined ||
+      new_cost_allocation.unit_cost === null
+    ) {
+      errors.push({
+        field: "new_cost_allocation.unit_cost",
+        message: "Unit cost is required for new cost",
+      });
+    } else if (
+      typeof new_cost_allocation.unit_cost !== "number" ||
+      new_cost_allocation.unit_cost < 0
+    ) {
+      errors.push({
+        field: "new_cost_allocation.unit_cost",
+        message: "Unit cost must be a positive number",
+      });
+    }
+    if (
+      new_cost_allocation.allocation_quantity !== undefined &&
+      (typeof new_cost_allocation.allocation_quantity !== "number" ||
+        new_cost_allocation.allocation_quantity < 1)
+    ) {
+      errors.push({
+        field: "new_cost_allocation.allocation_quantity",
+        message: "Allocation quantity must be a positive number",
+      });
+    }
+    if (
+      new_cost_allocation.allocation_amount !== undefined &&
+      (typeof new_cost_allocation.allocation_amount !== "number" ||
+        new_cost_allocation.allocation_amount < 0)
+    ) {
+      errors.push({
+        field: "new_cost_allocation.allocation_amount",
+        message: "Allocation amount must be a positive number",
       });
     }
   }
@@ -78,37 +192,192 @@ export const createSale = asyncHandlers(async (req, res) => {
     throw new ApiErrors(400, "Validation failed", errors);
   }
 
-  const sale = await Sale.create({
-    user_id: req.user._id,
-    product_name: product_name.trim(),
-    quantity: quantity || 1,
-    sale_total,
-    currency: currency || "BDT",
-    payment_method,
-    bank_id: bank_id || null,
-    bank_name: bank_name || null,
-    cash_holder: cash_holder || null,
-    date: date ? new Date(date) : new Date(),
-    status: "completed",
-  });
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  res.status(201).json({
-    sale: {
-      id: sale._id.toString(),
-      user_id: sale.user_id.toString(),
-      product_name: sale.product_name,
-      quantity: sale.quantity,
-      sale_total: sale.sale_total,
-      currency: sale.currency,
-      payment_method: sale.payment_method,
-      bank_id: sale.bank_id,
-      bank_name: sale.bank_name,
-      cash_holder: sale.cash_holder,
-      date: sale.date,
-      status: sale.status,
-      created_at: sale.created_at,
-    },
-  });
+  try {
+    const sale = await Sale.create(
+      [
+        {
+          user_id: req.user._id,
+          product_name: product_name.trim(),
+          quantity: quantity || 1,
+          sale_total,
+          currency: currency || "BDT",
+          payment_method,
+          bank_id: bank_id || null,
+          bank_name: bank_name || null,
+          cash_holder: cash_holder || null,
+          date: date ? new Date(date) : new Date(),
+          status: "completed",
+        },
+      ],
+      { session }
+    );
+
+    const allocationsCreated = [];
+    const newCostsCreated = [];
+
+    if (existing_allocation) {
+      const costEntry = await CostEntry.findOne({
+        _id: existing_allocation.cost_id,
+        user_id: req.user._id,
+      });
+
+      if (!costEntry) {
+        throw new ApiErrors(404, "Cost entry not found");
+      }
+
+      const remainingQuantity =
+        costEntry.quantity - (costEntry.allocated_quantity || 0);
+      const remainingAmount =
+        costEntry.total_cost - (costEntry.allocated_amount || 0);
+
+      const allocationQty =
+        existing_allocation.allocation_quantity || Math.ceil(remainingQuantity);
+      const finalAllocationQty = Math.min(allocationQty, remainingQuantity);
+
+      let allocationAmt = existing_allocation.allocation_amount;
+      if (!allocationAmt) {
+        allocationAmt = finalAllocationQty * costEntry.unit_cost;
+      }
+
+      if (finalAllocationQty <= 0 || allocationAmt <= 0) {
+        throw new ApiErrors(400, "No remaining quantity or amount to allocate");
+      }
+
+      const allocation = await Allocation.create(
+        [
+          {
+            user_id: req.user._id,
+            sale_id: sale[0]._id,
+            cost_id: costEntry._id,
+            allocated_amount: allocationAmt,
+            allocation_quantity: finalAllocationQty,
+            unit_cost_at_allocation: costEntry.unit_cost,
+          },
+        ],
+        { session }
+      );
+      allocationsCreated.push(allocation[0]);
+
+      await CostEntry.findByIdAndUpdate(
+        costEntry._id,
+        {
+          $inc: {
+            allocated_amount: allocationAmt,
+            allocated_quantity: finalAllocationQty,
+          },
+        },
+        { session }
+      );
+
+      const updatedCost = await CostEntry.findById(costEntry._id).session(
+        session
+      );
+      if (
+        updatedCost.allocated_quantity >= updatedCost.quantity &&
+        updatedCost.status !== "fully_allocated"
+      ) {
+        await CostEntry.findByIdAndUpdate(
+          costEntry._id,
+          { status: "fully_allocated" },
+          { session }
+        );
+      }
+    }
+
+    if (new_cost_allocation) {
+      const costTotal =
+        new_cost_allocation.quantity * new_cost_allocation.unit_cost;
+      const allocationQty = new_cost_allocation.allocation_quantity || 1;
+      let allocationAmt = new_cost_allocation.allocation_amount;
+
+      if (!allocationAmt) {
+        allocationAmt = allocationQty * new_cost_allocation.unit_cost;
+      }
+
+      const newCostEntry = await CostEntry.create(
+        [
+          {
+            user_id: req.user._id,
+            description: new_cost_allocation.description.trim(),
+            quantity: new_cost_allocation.quantity,
+            unit_cost: new_cost_allocation.unit_cost,
+            total_cost: costTotal,
+            allocated_amount: allocationAmt,
+            allocated_quantity: allocationQty,
+            currency: new_cost_allocation.currency || "BDT",
+            date: new_cost_allocation.date
+              ? new Date(new_cost_allocation.date)
+              : new Date(),
+            status:
+              allocationQty >= new_cost_allocation.quantity
+                ? "fully_allocated"
+                : "active",
+          },
+        ],
+        { session }
+      );
+      newCostsCreated.push(newCostEntry[0]);
+
+      const allocation = await Allocation.create(
+        [
+          {
+            user_id: req.user._id,
+            sale_id: sale[0]._id,
+            cost_id: newCostEntry[0]._id,
+            allocated_amount: allocationAmt,
+            allocation_quantity: allocationQty,
+            unit_cost_at_allocation: new_cost_allocation.unit_cost,
+          },
+        ],
+        { session }
+      );
+      allocationsCreated.push(allocation[0]);
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(201).json({
+      sale: {
+        id: sale[0]._id.toString(),
+        user_id: sale[0].user_id.toString(),
+        product_name: sale[0].product_name,
+        quantity: sale[0].quantity,
+        sale_total: sale[0].sale_total,
+        currency: sale[0].currency,
+        payment_method: sale[0].payment_method,
+        bank_id: sale[0].bank_id,
+        bank_name: sale[0].bank_name,
+        cash_holder: sale[0].cash_holder,
+        date: sale[0].date,
+        status: sale[0].status,
+        created_at: sale[0].created_at,
+      },
+      allocations_created: allocationsCreated.map((a) => ({
+        id: a._id.toString(),
+        sale_id: a.sale_id.toString(),
+        cost_id: a.cost_id?.toString() || null,
+        allocated_amount: a.allocated_amount,
+        allocation_quantity: a.allocation_quantity,
+      })),
+      new_costs_created: newCostsCreated.map((c) => ({
+        id: c._id.toString(),
+        description: c.description,
+        quantity: c.quantity,
+        unit_cost: c.unit_cost,
+        total_cost: c.total_cost,
+        allocated_amount: c.allocated_amount,
+        allocated_quantity: c.allocated_quantity,
+      })),
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
 });
 
 export const listSales = asyncHandlers(async (req, res) => {

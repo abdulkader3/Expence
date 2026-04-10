@@ -27,7 +27,14 @@ const debugError = (message, error) => {
 };
 
 export const createAllocation = asyncHandlers(async (req, res) => {
-  const { sale_id, cost_id, cost_template_id, allocated_amount } = req.body;
+  const {
+    sale_id,
+    cost_id,
+    cost_template_id,
+    allocated_amount,
+    allocation_quantity,
+    unit_cost,
+  } = req.body;
 
   debugLog("Incoming allocation request", {
     user_id: req.user._id,
@@ -35,6 +42,8 @@ export const createAllocation = asyncHandlers(async (req, res) => {
     cost_id,
     cost_template_id,
     allocated_amount,
+    allocation_quantity,
+    unit_cost,
   });
 
   const errors = [];
@@ -82,6 +91,17 @@ export const createAllocation = asyncHandlers(async (req, res) => {
     });
   }
 
+  if (
+    allocation_quantity !== undefined &&
+    allocation_quantity !== null &&
+    (typeof allocation_quantity !== "number" || allocation_quantity < 1)
+  ) {
+    errors.push({
+      field: "allocation_quantity",
+      message: "Allocation quantity must be a positive number",
+    });
+  }
+
   if (errors.length > 0) {
     debugError("Validation failed", errors);
     throw new ApiErrors(400, "Validation failed", errors);
@@ -96,6 +116,8 @@ export const createAllocation = asyncHandlers(async (req, res) => {
 
   let costEntry = null;
   let costTemplate = null;
+  let finalAllocationQuantity = allocation_quantity || 1;
+  let finalAllocatedAmount = allocated_amount;
 
   if (cost_id) {
     costEntry = await CostEntry.findOne({
@@ -111,21 +133,51 @@ export const createAllocation = asyncHandlers(async (req, res) => {
 
     debugLog("Cost entry found before allocation", {
       cost_id: costEntry._id,
+      quantity: costEntry.quantity,
+      unit_cost: costEntry.unit_cost,
       total_cost: costEntry.total_cost,
+      allocated_quantity: costEntry.allocated_quantity,
       allocated_amount: costEntry.allocated_amount,
+      remaining_quantity: costEntry.quantity - costEntry.allocated_quantity,
       remaining_amount: costEntry.total_cost - costEntry.allocated_amount,
     });
 
-    const remainingAmount = costEntry.total_cost - costEntry.allocated_amount;
-    if (allocated_amount > remainingAmount) {
-      debugError("Allocation exceeds remaining amount", {
-        requested: allocated_amount,
+    const remainingQuantity =
+      costEntry.quantity - (costEntry.allocated_quantity || 0);
+    const remainingAmount =
+      costEntry.total_cost - (costEntry.allocated_amount || 0);
+
+    if (finalAllocationQuantity > remainingQuantity) {
+      debugError("Allocation quantity exceeds remaining quantity", {
+        requested: finalAllocationQuantity,
+        remaining: remainingQuantity,
+      });
+      throw new ApiErrors(
+        400,
+        `Allocation quantity exceeds remaining quantity. Maximum allowed: ${remainingQuantity}`
+      );
+    }
+
+    if (finalAllocatedAmount > remainingAmount) {
+      debugError("Allocation amount exceeds remaining amount", {
+        requested: finalAllocatedAmount,
         remaining: remainingAmount,
       });
       throw new ApiErrors(
         400,
         `Allocated amount exceeds remaining unallocated amount. Maximum allowed: ${remainingAmount}`
       );
+    }
+
+    if (!allocation_quantity && costEntry.unit_cost) {
+      finalAllocationQuantity = Math.ceil(
+        remainingAmount / costEntry.unit_cost
+      );
+      finalAllocatedAmount = finalAllocationQuantity * costEntry.unit_cost;
+      if (finalAllocationQuantity > remainingQuantity) {
+        finalAllocationQuantity = remainingQuantity;
+        finalAllocatedAmount = remainingAmount;
+      }
     }
   }
 
@@ -154,13 +206,18 @@ export const createAllocation = asyncHandlers(async (req, res) => {
     const allocationData = {
       user_id: req.user._id,
       sale_id,
-      allocated_amount,
+      allocated_amount: finalAllocatedAmount,
+      allocation_quantity: finalAllocationQuantity,
     };
 
     if (cost_id) {
       allocationData.cost_id = cost_id;
+      allocationData.unit_cost_at_allocation = costEntry.unit_cost;
     } else {
       allocationData.cost_template_id = cost_template_id;
+      if (unit_cost) {
+        allocationData.unit_cost_at_allocation = unit_cost;
+      }
     }
 
     const allocation = await Allocation.create([allocationData], { session });
@@ -168,15 +225,19 @@ export const createAllocation = asyncHandlers(async (req, res) => {
     debugLog("Allocation created", { allocation_id: allocation[0]._id });
 
     if (costEntry) {
-      debugLog("Updating cost entry allocated_amount with $inc", {
+      debugLog("Updating cost entry with $inc", {
         cost_id,
-        increment: allocated_amount,
+        allocated_amount: finalAllocatedAmount,
+        allocated_quantity: finalAllocationQuantity,
       });
 
       await CostEntry.findByIdAndUpdate(
         cost_id,
         {
-          $inc: { allocated_amount: allocated_amount },
+          $inc: {
+            allocated_amount: finalAllocatedAmount,
+            allocated_quantity: finalAllocationQuantity,
+          },
         },
         { session }
       );
@@ -188,8 +249,14 @@ export const createAllocation = asyncHandlers(async (req, res) => {
 
       debugLog("Cost entry after allocation", {
         cost_id: costEntryAfterUpdate._id,
+        quantity: costEntryAfterUpdate.quantity,
+        unit_cost: costEntryAfterUpdate.unit_cost,
         total_cost: costEntryAfterUpdate.total_cost,
+        allocated_quantity: costEntryAfterUpdate.allocated_quantity,
         allocated_amount: costEntryAfterUpdate.allocated_amount,
+        remaining_quantity:
+          costEntryAfterUpdate.quantity -
+          costEntryAfterUpdate.allocated_quantity,
         remaining_amount:
           costEntryAfterUpdate.total_cost -
           costEntryAfterUpdate.allocated_amount,
@@ -197,7 +264,7 @@ export const createAllocation = asyncHandlers(async (req, res) => {
       });
 
       const remainingAfterAllocation =
-        costEntryAfterUpdate.total_cost - costEntryAfterUpdate.allocated_amount;
+        costEntryAfterUpdate.quantity - costEntryAfterUpdate.allocated_quantity;
 
       if (
         remainingAfterAllocation <= 0 &&
@@ -230,6 +297,8 @@ export const createAllocation = asyncHandlers(async (req, res) => {
         cost_id: allocation[0].cost_id?.toString() || null,
         cost_template_id: allocation[0].cost_template_id?.toString() || null,
         allocated_amount: allocation[0].allocated_amount,
+        allocation_quantity: allocation[0].allocation_quantity,
+        unit_cost_at_allocation: allocation[0].unit_cost_at_allocation,
         created_at: allocation[0].created_at,
       },
     };
@@ -252,8 +321,13 @@ export const createAllocation = asyncHandlers(async (req, res) => {
       const updatedCostEntry = await CostEntry.findById(cost_id);
       responseData.cost_entry_summary = {
         cost_id: costEntry._id.toString(),
+        quantity: costEntry.quantity,
+        unit_cost: costEntry.unit_cost,
         total_cost: costEntry.total_cost,
+        allocated_quantity: updatedCostEntry.allocated_quantity,
         allocated_amount: updatedCostEntry.allocated_amount,
+        remaining_quantity:
+          costEntry.quantity - updatedCostEntry.allocated_quantity,
         remaining_unallocated_cost:
           costEntry.total_cost - updatedCostEntry.allocated_amount,
         status: updatedCostEntry.status,

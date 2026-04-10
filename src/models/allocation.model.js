@@ -25,6 +25,15 @@ const allocationSchema = new Schema(
       required: [true, "Allocated amount is required"],
       min: [0, "Allocated amount cannot be negative"],
     },
+    allocation_quantity: {
+      type: Number,
+      default: 1,
+      min: [1, "Allocation quantity must be at least 1"],
+    },
+    unit_cost_at_allocation: {
+      type: Number,
+      default: null,
+    },
     is_reversed: {
       type: Boolean,
       default: false,

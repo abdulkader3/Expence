@@ -3,7 +3,8 @@ import { asyncHandlers } from "../utils/asyncHandlers.js";
 import { ApiErrors } from "../utils/ApiErrors.js";
 
 export const createCostEntry = asyncHandlers(async (req, res) => {
-  const { description, total_cost, currency, date } = req.body;
+  const { description, quantity, unit_cost, total_cost, currency, date } =
+    req.body;
 
   const errors = [];
 
@@ -18,27 +19,54 @@ export const createCostEntry = asyncHandlers(async (req, res) => {
     });
   }
 
-  if (total_cost === undefined || total_cost === null) {
+  if (quantity === undefined || quantity === null) {
     errors.push({
-      field: "total_cost",
-      message: "Total cost is required",
+      field: "quantity",
+      message: "Quantity is required",
     });
-  } else if (typeof total_cost !== "number" || total_cost <= 0) {
+  } else if (typeof quantity !== "number" || quantity < 1) {
     errors.push({
-      field: "total_cost",
-      message: "Total cost must be a positive number",
+      field: "quantity",
+      message: "Quantity must be a number greater than or equal to 1",
     });
+  }
+
+  if (unit_cost === undefined || unit_cost === null) {
+    errors.push({
+      field: "unit_cost",
+      message: "Unit cost is required",
+    });
+  } else if (typeof unit_cost !== "number" || unit_cost < 0) {
+    errors.push({
+      field: "unit_cost",
+      message: "Unit cost must be a positive number",
+    });
+  }
+
+  if (total_cost !== undefined && total_cost !== null) {
+    if (typeof total_cost !== "number" || total_cost <= 0) {
+      errors.push({
+        field: "total_cost",
+        message: "Total cost must be a positive number",
+      });
+    }
   }
 
   if (errors.length > 0) {
     throw new ApiErrors(400, "Validation failed", errors);
   }
 
+  const calculatedTotal = quantity * unit_cost;
+  const finalTotal = total_cost ?? calculatedTotal;
+
   const costEntry = await CostEntry.create({
     user_id: req.user._id,
     description: description.trim(),
-    total_cost,
+    quantity,
+    unit_cost,
+    total_cost: finalTotal,
     allocated_amount: 0,
+    allocated_quantity: 0,
     currency: currency || "BDT",
     date: date ? new Date(date) : new Date(),
     status: "active",
@@ -49,9 +77,13 @@ export const createCostEntry = asyncHandlers(async (req, res) => {
       id: costEntry._id.toString(),
       user_id: costEntry.user_id.toString(),
       description: costEntry.description,
+      quantity: costEntry.quantity,
+      unit_cost: costEntry.unit_cost,
       total_cost: costEntry.total_cost,
       allocated_amount: costEntry.allocated_amount,
+      allocated_quantity: costEntry.allocated_quantity,
       remaining_amount: costEntry.total_cost - costEntry.allocated_amount,
+      remaining_quantity: costEntry.quantity - costEntry.allocated_quantity,
       currency: costEntry.currency,
       date: costEntry.date,
       status: costEntry.status,
@@ -97,9 +129,13 @@ export const listCostEntries = asyncHandlers(async (req, res) => {
     id: entry._id.toString(),
     user_id: entry.user_id.toString(),
     description: entry.description,
+    quantity: entry.quantity,
+    unit_cost: entry.unit_cost,
     total_cost: entry.total_cost,
     allocated_amount: entry.allocated_amount,
+    allocated_quantity: entry.allocated_quantity,
     remaining_amount: entry.total_cost - entry.allocated_amount,
+    remaining_quantity: entry.quantity - entry.allocated_quantity,
     currency: entry.currency,
     date: entry.date,
     status: entry.status,
@@ -132,9 +168,13 @@ export const getCostEntryDetail = asyncHandlers(async (req, res) => {
       id: costEntry._id.toString(),
       user_id: costEntry.user_id.toString(),
       description: costEntry.description,
+      quantity: costEntry.quantity,
+      unit_cost: costEntry.unit_cost,
       total_cost: costEntry.total_cost,
       allocated_amount: costEntry.allocated_amount,
+      allocated_quantity: costEntry.allocated_quantity,
       remaining_amount: costEntry.total_cost - costEntry.allocated_amount,
+      remaining_quantity: costEntry.quantity - costEntry.allocated_quantity,
       currency: costEntry.currency,
       date: costEntry.date,
       status: costEntry.status,

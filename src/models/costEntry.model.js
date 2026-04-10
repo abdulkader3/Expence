@@ -14,6 +14,17 @@ const costEntrySchema = new Schema(
       minlength: [1, "Description cannot be empty"],
       maxlength: [500, "Description cannot exceed 500 characters"],
     },
+    quantity: {
+      type: Number,
+      required: [true, "Quantity is required"],
+      min: [1, "Quantity must be at least 1"],
+      default: 1,
+    },
+    unit_cost: {
+      type: Number,
+      required: [true, "Unit cost is required"],
+      min: [0, "Unit cost must be positive"],
+    },
     total_cost: {
       type: Number,
       required: [true, "Total cost is required"],
@@ -23,6 +34,11 @@ const costEntrySchema = new Schema(
       type: Number,
       default: 0,
       min: [0, "Allocated amount cannot be negative"],
+    },
+    allocated_quantity: {
+      type: Number,
+      default: 0,
+      min: [0, "Allocated quantity cannot be negative"],
     },
     currency: {
       type: String,
@@ -46,6 +62,17 @@ const costEntrySchema = new Schema(
 
 costEntrySchema.virtual("remaining_amount").get(function () {
   return this.total_cost - this.allocated_amount;
+});
+
+costEntrySchema.virtual("remaining_quantity").get(function () {
+  return this.quantity - this.allocated_quantity;
+});
+
+costEntrySchema.pre("save", function (next) {
+  if (this.quantity && this.unit_cost && !this.isModified("total_cost")) {
+    this.total_cost = this.quantity * this.unit_cost;
+  }
+  next();
 });
 
 costEntrySchema.set("toJSON", { virtuals: true });
