@@ -1,4 +1,5 @@
 import User from "../models/user.model.js";
+import Partner from "../models/partner.model.js";
 import { asyncHandlers } from "../utils/asyncHandlers.js";
 import { ApiErrors } from "../utils/ApiErrors.js";
 import { UploadOnCloudinary } from "../utils/Cloudinary.js";
@@ -67,6 +68,14 @@ export const updateProfile = asyncHandlers(async (req, res) => {
   const updatedUser = await User.findByIdAndUpdate(req.user._id, updateFields, {
     new: true,
   }).select("-password_hash -refresh_token");
+
+  // Sync avatar_url to Partner if it was updated
+  if (updateFields.avatar_url) {
+    await Partner.findOneAndUpdate(
+      { created_by: req.user._id },
+      { avatar_url: updateFields.avatar_url }
+    );
+  }
 
   res.status(200).json({
     user: {

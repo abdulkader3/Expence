@@ -6,6 +6,15 @@ import { asyncHandlers } from "../utils/asyncHandlers.js";
 import { ApiErrors } from "../utils/ApiErrors.js";
 import { UploadOnCloudinary } from "../utils/Cloudinary.js";
 
+const getPartnerAvatar = async (partner) => {
+  if (partner.avatar_url) return partner.avatar_url;
+  if (partner.created_by) {
+    const user = await User.findById(partner.created_by).select("avatar_url");
+    return user?.avatar_url || null;
+  }
+  return null;
+};
+
 export const createNewPartner = asyncHandlers(async (req, res) => {
   const { name, email, notes } = req.body;
 
@@ -56,6 +65,12 @@ export const createSelfPartner = asyncHandlers(async (req, res) => {
   let partner = await Partner.findOne({ created_by: req.user._id });
 
   if (partner) {
+    // Sync avatar from user if partner doesn't have one
+    if (!partner.avatar_url && user.avatar_url) {
+      partner.avatar_url = user.avatar_url;
+      await partner.save();
+    }
+
     return res.status(200).json({
       partner: {
         id: partner._id.toString(),
@@ -924,31 +939,40 @@ export const getLeaderboard = asyncHandlers(async (req, res) => {
   let rank = 0;
   let previousTotal = null;
 
-  const formattedLeaderboard = leaderboard.map((partner, index) => {
-    if (partner.total_contributed !== previousTotal) {
-      rank = index + 1;
-      previousTotal = partner.total_contributed;
-    }
+  const formattedLeaderboard = await Promise.all(
+    leaderboard.map(async (partner, index) => {
+      if (partner.total_contributed !== previousTotal) {
+        rank = index + 1;
+        previousTotal = partner.total_contributed;
+      }
 
-    return {
-      partner_id: partner._id.toString(),
-      name: partner.name,
-      avatar_url: partner.avatar_url,
-      total_contributed: partner.total_contributed,
-      rank,
-      top_contributor: rank === 1,
-      last_contribution_at: partner.last_contribution_at,
-      ...(include_recent_transactions === "true" && {
-        recent_transactions: partner.recent_transactions?.map((t) => ({
-          id: t.id?.toString(),
-          amount: t.amount,
-          type: t.type,
-          description: t.description,
-          created_at: t.created_at,
-        })),
-      }),
-    };
-  });
+      const avatarUrl =
+        partner.avatar_url ||
+        (partner.created_by
+          ? (await User.findById(partner.created_by).select("avatar_url"))
+              ?.avatar_url
+          : null);
+
+      return {
+        partner_id: partner._id.toString(),
+        name: partner.name,
+        avatar_url: avatarUrl,
+        total_contributed: partner.total_contributed,
+        rank,
+        top_contributor: rank === 1,
+        last_contribution_at: partner.last_contribution_at,
+        ...(include_recent_transactions === "true" && {
+          recent_transactions: partner.recent_transactions?.map((t) => ({
+            id: t.id?.toString(),
+            amount: t.amount,
+            type: t.type,
+            description: t.description,
+            created_at: t.created_at,
+          })),
+        }),
+      };
+    })
+  );
 
   res.status(200).json({
     data: formattedLeaderboard,
@@ -1216,5 +1240,37 @@ export const syncOfflineQueue = asyncHandlers(async (req, res) => {
       success: successCount,
       failed: queue.length - successCount,
     },
+  });
+});
+
+export const syncPartnerAvatars = asyncHandlers(async (req, res) => {
+  const partners = await Partner.find({});
+
+  let updatedCount = 0;
+  let skippedCount = 0;
+
+  for (const partner of partners) {
+    if (!partner.created_by) {
+      skippedCount++;
+      continue;
+    }
+
+    const user = await User.findById(partner.created_by);
+
+    if (user && user.avatar_url && !partner.avatar_url) {
+      partner.avatar_url = user.avatar_url;
+      await partner.save();
+      updatedCount++;
+    } else if (!partner.avatar_url) {
+      skippedCount++;
+    } else {
+      skippedCount++;
+    }
+  }
+
+  res.status(200).json({
+    message: "Avatar sync completed",
+    updated: updatedCount,
+    skipped: skippedCount,
   });
 });
