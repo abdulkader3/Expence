@@ -2,6 +2,7 @@ import Sale from "../models/sale.model.js";
 import Allocation from "../models/allocation.model.js";
 import CostEntry from "../models/costEntry.model.js";
 import CostTemplate from "../models/costTemplate.model.js";
+import User from "../models/user.model.js";
 import mongoose from "mongoose";
 import { asyncHandlers } from "../utils/asyncHandlers.js";
 import { ApiErrors } from "../utils/ApiErrors.js";
@@ -394,7 +395,7 @@ export const listSales = asyncHandlers(async (req, res) => {
   const finalLimit = parseInt(per_page) || 10;
   const finalOffset = (parseInt(page) - 1) * finalLimit;
 
-  const filter = {};
+  const filter = { status: { $ne: "deleted" } };
 
   if (from || to) {
     filter.date = {};
@@ -574,4 +575,143 @@ export const refundSale = asyncHandlers(async (req, res) => {
     session.endSession();
     throw error;
   }
+});
+
+export const deleteSale = asyncHandlers(async (req, res) => {
+  const { sale_id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(sale_id)) {
+    throw new ApiErrors(400, "Invalid sale ID format");
+  }
+
+  const sale = await Sale.findOne({ _id: sale_id, user_id: req.user._id });
+
+  if (!sale) {
+    throw new ApiErrors(404, "Sale not found");
+  }
+
+  const allocations = await Allocation.find({
+    sale_id: sale._id,
+    user_id: req.user._id,
+    is_reversed: false,
+  });
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const auditLogs = [];
+    const deletedAt = new Date();
+
+    for (const allocation of allocations) {
+      auditLogs.push({
+        allocation_id: allocation._id.toString(),
+        cost_id: allocation.cost_id?.toString(),
+        allocated_amount: allocation.allocated_amount,
+        allocation_quantity: allocation.allocation_quantity,
+        reversed_at: deletedAt,
+      });
+
+      await Allocation.findByIdAndUpdate(
+        allocation._id,
+        { is_reversed: true, reversed_at: deletedAt, reversal_reason: "sale_deleted" },
+        { session }
+      );
+
+      if (allocation.cost_id) {
+        await CostEntry.findByIdAndUpdate(
+          allocation.cost_id,
+          { 
+            $inc: { 
+              allocated_amount: -allocation.allocated_amount,
+              allocated_quantity: -allocation.allocation_quantity 
+            }
+          },
+          { session }
+        );
+      }
+    }
+
+    await Sale.findByIdAndUpdate(sale_id, { 
+      status: "deleted",
+      deleted_at: deletedAt,
+      deleted_by: req.user._id,
+      audit_log: {
+        deleted_at: deletedAt,
+        allocations_reversed: allocations.length,
+        reversed_allocation_details: auditLogs,
+      }
+    }, { session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json({
+      success: true,
+      message: "Sale deleted successfully",
+      deleted_sale: {
+        id: sale._id.toString(),
+        product_name: sale.product_name,
+        sale_total: sale.sale_total,
+        deleted_at: deletedAt,
+      },
+      allocations_reversed: allocations.length,
+      audit_log: auditLogs,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+});
+
+export const listDeletedSales = asyncHandlers(async (req, res) => {
+  const { page = 1, per_page = 20 } = req.query;
+
+  const finalLimit = parseInt(per_page) || 20;
+  const finalOffset = (parseInt(page) - 1) * finalLimit;
+
+  const filter = { status: "deleted", user_id: req.user._id };
+
+  const total = await Sale.countDocuments(filter);
+
+  const sales = await Sale.find(filter)
+    .sort({ deleted_at: -1 })
+    .skip(finalOffset)
+    .limit(finalLimit)
+    .populate("deleted_by", "name email");
+
+  const formattedSales = sales.map((sale) => {
+    const deletedBy = sale.deleted_by
+      ? {
+          id: sale.deleted_by._id.toString(),
+          name: sale.deleted_by.name,
+          email: sale.deleted_by.email,
+        }
+      : null;
+
+    return {
+      id: sale._id.toString(),
+      product_name: sale.product_name,
+      quantity: sale.quantity,
+      sale_total: sale.sale_total,
+      currency: sale.currency,
+      payment_method: sale.payment_method,
+      bank_name: sale.bank_name,
+      cash_holder: sale.cash_holder,
+      date: sale.date,
+      deleted_at: sale.deleted_at,
+      deleted_by: deletedBy,
+      audit_log: sale.audit_log || [],
+    };
+  });
+
+  res.status(200).json({
+    data: formattedSales,
+    meta: {
+      total,
+      page: parseInt(page),
+      per_page: finalLimit,
+    },
+  });
 });

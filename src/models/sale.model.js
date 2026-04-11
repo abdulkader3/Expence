@@ -56,7 +56,20 @@ const saleSchema = new Schema(
     status: {
       type: String,
       default: "completed",
-      enum: ["completed", "pending", "cancelled", "refunded"],
+      enum: ["completed", "pending", "cancelled", "refunded", "deleted", "deleted_allocation"],
+    },
+    deleted_at: {
+      type: Date,
+      default: null,
+    },
+    deleted_by: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    audit_log: {
+      type: Array,
+      default: [],
     },
   },
   {

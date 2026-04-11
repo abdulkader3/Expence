@@ -42,6 +42,11 @@ const allocationSchema = new Schema(
       type: Date,
       default: null,
     },
+    reversal_reason: {
+      type: String,
+      default: null,
+      enum: [null, "refund", "sale_deleted", "cost_deleted"],
+    },
   },
   {
     timestamps: { createdAt: "created_at", updatedAt: "updated_at" },

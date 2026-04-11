@@ -52,7 +52,20 @@ const costEntrySchema = new Schema(
     status: {
       type: String,
       default: "active",
-      enum: ["active", "fully_allocated", "cancelled"],
+      enum: ["active", "fully_allocated", "cancelled", "deleted"],
+    },
+    deleted_at: {
+      type: Date,
+      default: null,
+    },
+    deleted_by: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    audit_log: {
+      type: Array,
+      default: [],
     },
   },
   {
