@@ -22,6 +22,14 @@ const UploadOnCloudinary = async (localFilePath) => {
 
     //success
 
+    // Fix: replace http:// with https:// in URLs
+    if (response.url) {
+      response.url = response.url.replace(/^http:\/\//, "https://");
+    }
+    if (response.thumbnail_url) {
+      response.thumbnail_url = response.thumbnail_url.replace(/^http:\/\//, "https://");
+    }
+
     fs.unlinkSync(localFilePath);
     console.log(response.url);
     return response;
